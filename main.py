@@ -570,5 +570,5 @@ async def remove_item_panel_callback(_, query: CallbackQuery):
     except Exception:
         pass
 
-print('runnig./.')
+print('running...')
 app.run()
