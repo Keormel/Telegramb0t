@@ -459,7 +459,7 @@ async def admin_panel(_, message: Message):
          InlineKeyboardButton("Eliminați brand 💣", callback_data=json.dumps({"cn":"remove_category_panel"}))],
         [InlineKeyboardButton("Adăugați modelul 👀", callback_data=json.dumps({"cn":"add_subcategory_panel"})),
          InlineKeyboardButton("Eliminați modelul 💣", callback_data=json.dumps({"cn":"remove_subcategory_panel"}))],
-        [InlineKeyboardButton("News 📰", callback_data=json.dumps({"cn":"news_confirm"}))]
+        [InlineKeyboardButton("News 📰", callback_data=json.dumps({"cn":"send_news_panel"}))]
     ]
     markup = InlineKeyboardMarkup(buttons)
     await app.send_message(message.chat.id, "Admin panel ⚙️", reply_markup=markup)
@@ -565,6 +565,15 @@ async def remove_subcategory_input(_, message: Message):
 async def remove_item_panel_callback(_, query: CallbackQuery):
     # Повторяет действия команды /remove_item
     await app.send_message(query.message.chat.id, 'Introduceți articolele produselor pentru anulare prin (SPACE). Exemplu:/remove_item 1 12 40 ')
+    try:
+        await app.delete_messages(query.message.chat.id, query.message.id)
+    except Exception:
+        pass
+
+@app.on_callback_query(filters.create(lambda _, __, q: json.loads(q.data).get("cn") == "send_news_panel" if q.data else False))
+async def send_news_panel_callback(_, query: CallbackQuery):
+    set_state(query.message.chat.id ,json.dumps({"state": "news_input"}))
+    await app.send_message(query.message.chat.id, "Scrie știrea și o voi trimite tuturor clienților")
     try:
         await app.delete_messages(query.message.chat.id, query.message.id)
     except Exception:
