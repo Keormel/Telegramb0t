@@ -453,16 +453,16 @@ async def get_chat_id(_, message: Message):
 @app.on_message(admin & filters.command("admin"))
 async def admin_panel(_, message: Message):
     buttons = [
-        [InlineKeyboardButton("Добавить товар", callback_data=json.dumps({"cn":"add_item_panel"})),
-         InlineKeyboardButton("Удалить товар", callback_data=json.dumps({"cn":"remove_item_panel"}))],
-        [InlineKeyboardButton("Добавить категорию", callback_data=json.dumps({"cn":"add_category_panel"})),
-         InlineKeyboardButton("Удалить категорию", callback_data=json.dumps({"cn":"remove_category_panel"}))],
-        [InlineKeyboardButton("Добавить подкатегорию", callback_data=json.dumps({"cn":"add_subcategory_panel"})),
-         InlineKeyboardButton("Удалить подкатегорию", callback_data=json.dumps({"cn":"remove_subcategory_panel"}))],
-        [InlineKeyboardButton("Рассылка", callback_data=json.dumps({"cn":"news_confirm"}))]
+        [InlineKeyboardButton("Adăugați produsul 🛒", callback_data=json.dumps({"cn":"add_item_panel"})),
+         InlineKeyboardButton("Eliminați produsul 💣", callback_data=json.dumps({"cn":"remove_item_panel"}))],
+        [InlineKeyboardButton("Adăugați brand 👟", callback_data=json.dumps({"cn":"add_category_panel"})),
+         InlineKeyboardButton("Eliminați brand 💣", callback_data=json.dumps({"cn":"remove_category_panel"}))],
+        [InlineKeyboardButton("Adăugați modelul 👀", callback_data=json.dumps({"cn":"add_subcategory_panel"})),
+         InlineKeyboardButton("Eliminați modelul 💣", callback_data=json.dumps({"cn":"remove_subcategory_panel"}))],
+        [InlineKeyboardButton("News 📰", callback_data=json.dumps({"cn":"news_confirm"}))]
     ]
     markup = InlineKeyboardMarkup(buttons)
-    await app.send_message(message.chat.id, "Админ-панель", reply_markup=markup)
+    await app.send_message(message.chat.id, "Admin panel ⚙️", reply_markup=markup)
 
 @app.on_callback_query(filters.create(lambda _, __, q: json.loads(q.data).get("cn") == "add_item_panel" if q.data else False))
 async def add_item_panel_callback(_, query: CallbackQuery):
@@ -484,7 +484,7 @@ async def add_item_panel_callback(_, query: CallbackQuery):
 @app.on_callback_query(filters.create(lambda _, __, q: json.loads(q.data).get("cn") == "add_category_panel" if q.data else False))
 async def add_category_panel_callback(_, query: CallbackQuery):
     set_state(query.message.chat.id, json.dumps({"state": "add_category_input"}))
-    await app.send_message(query.message.chat.id, "Введите название новой категории")
+    await app.send_message(query.message.chat.id, "Introduceți un nume pentru nou brand")
     try:
         await app.delete_messages(query.message.chat.id, query.message.id)
     except Exception:
@@ -497,13 +497,13 @@ async def add_category_input(_, message: Message):
     cur.execute("INSERT INTO model_brand (brand, model) VALUES (?, ?)", (brand, ""))  # пустая модель для категории
     con.commit()
     set_state(message.chat.id, json.dumps({'cn':'None'}))
-    await app.send_message(message.chat.id, f'Категория "{brand}" добавлена.')
+    await app.send_message(message.chat.id, f'Brand "{brand}" a fost adăugat.')
 
 # --- Удаление категории ---
 @app.on_callback_query(filters.create(lambda _, __, q: json.loads(q.data).get("cn") == "remove_category_panel" if q.data else False))
 async def remove_category_panel_callback(_, query: CallbackQuery):
     set_state(query.message.chat.id, json.dumps({"state": "remove_category_input"}))
-    await app.send_message(query.message.chat.id, "Введите название категории для удаления")
+    await app.send_message(query.message.chat.id, "Introduceți numele brendul pe care doriți să o ștergeți")
     try:
         await app.delete_messages(query.message.chat.id, query.message.id)
     except Exception:
@@ -515,13 +515,13 @@ async def remove_category_input(_, message: Message):
     cur.execute("DELETE FROM model_brand WHERE brand=? AND (model='' OR model IS NULL)", (brand,))
     con.commit()
     set_state(message.chat.id, json.dumps({'cn':'None'}))
-    await app.send_message(message.chat.id, f'Категория "{brand}" удалена.')
+    await app.send_message(message.chat.id, f'Brand "{brand}" a fost adăugat.')
 
 # --- Добавление подкатегории ---
 @app.on_callback_query(filters.create(lambda _, __, q: json.loads(q.data).get("cn") == "add_subcategory_panel" if q.data else False))
 async def add_subcategory_panel_callback(_, query: CallbackQuery):
     set_state(query.message.chat.id, json.dumps({"state": "add_subcategory_input"}))
-    await app.send_message(query.message.chat.id, "Введите название категории и подкатегории через запятую (пример: Nike, Air Max)")
+    await app.send_message(query.message.chat.id, "Introduceți numele de brand și numele de modelul separate prin virgule (exemplu: Nike, Air Max)")
     try:
         await app.delete_messages(query.message.chat.id, query.message.id)
     except Exception:
@@ -532,18 +532,18 @@ async def add_subcategory_input(_, message: Message):
     try:
         brand, model = [x.strip() for x in message.text.split(",", 1)]
     except Exception:
-        await app.send_message(message.chat.id, "Ошибка формата. Введите в формате: Категория, Подкатегория")
+        await app.send_message(message.chat.id, "Error. Vă rugăm să introduceți următorul format: Brand, Model.")
         return
     cur.execute("INSERT INTO model_brand (brand, model) VALUES (?, ?)", (brand, model))
     con.commit()
     set_state(message.chat.id, json.dumps({'cn':'None'}))
-    await app.send_message(message.chat.id, f'Подкатегория "{model}" для категории "{brand}" добавлена.')
+    await app.send_message(message.chat.id, f'Modelul „{model}” pentru categoria „{brand}” a fost adăugată.')
 
 # --- Удаление подкатегории ---
 @app.on_callback_query(filters.create(lambda _, __, q: json.loads(q.data).get("cn") == "remove_subcategory_panel" if q.data else False))
 async def remove_subcategory_panel_callback(_, query: CallbackQuery):
     set_state(query.message.chat.id, json.dumps({"state": "remove_subcategory_input"}))
-    await app.send_message(query.message.chat.id, "Введите название категории и подкатегории через запятую (пример: Nike, Air Max)")
+    await app.send_message(query.message.chat.id, "Introduceți numele de brand și numele de modelul separate prin virgule (exemplu: Nike, Air Max)")
     try:
         await app.delete_messages(query.message.chat.id, query.message.id)
     except Exception:
@@ -554,12 +554,12 @@ async def remove_subcategory_input(_, message: Message):
     try:
         brand, model = [x.strip() for x in message.text.split(",", 1)]
     except Exception:
-        await app.send_message(message.chat.id, "Ошибка формата. Введите в формате: Категория, Подкатегория")
+        await app.send_message(message.chat.id, "Eroare de format. Vă rugăm să introduceți următorul format: Categorie, Subcategorie.")
         return
     cur.execute("DELETE FROM model_brand WHERE brand=? AND model=?", (brand, model))
     con.commit()
     set_state(message.chat.id, json.dumps({'cn':'None'}))
-    await app.send_message(message.chat.id, f'Подкатегория "{model}" для категории "{brand}" удалена.')
+    await app.send_message(message.chat.id, f'Modelul „{model}” pentru categoria „{brand}” a fost adăugată.')
 
 @app.on_callback_query(filters.create(lambda _, __, q: json.loads(q.data).get("cn") == "remove_item_panel" if q.data else False))
 async def remove_item_panel_callback(_, query: CallbackQuery):
