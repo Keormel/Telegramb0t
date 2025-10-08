@@ -10,6 +10,24 @@ from filters import *
 from keyboard import *
 init()
 
+# Добавляем вызов создания таблицы промокодов сразу после инициализации БД
+try:
+    ensure_promo_table()
+except Exception:
+    # Если по какой-то причине создание не удалось — безопасно игнорируем здесь
+    pass
+
+# --- FIX: синхронизируем cur и con в текущем модуле с курсором/соединением из db.py ---
+try:
+    import db as db_mod
+    # Обновляем имена cur и con в пространстве имен main.py,
+    # чтобы обращения вида cur.execute(...) использовали реальный курсор.
+    cur = db_mod.cur
+    con = db_mod.con
+except Exception:
+    # если по какой-то причине не удалось — пропускаем, ошибки будут обработаны позже
+    pass
+
 app = Client('my_bot',
     api_id=API_ID, 
     api_hash=API_HASH,
@@ -389,17 +407,66 @@ async def order_number(_, message: Message):
     await app.send_message(mci, 'Introduceți orașul, raionul, strada:')
 
 @app.on_message(state('order_adress_input') & ~ has_text('Anulare⬅') & ~ filters.command('stop'))
-async def order_complete(_, message: Message):
+async def order_promo_ask(_, message: Message):
     mci = message.chat.id
-    data = json.loads(get_state(message.chat.id))['data']
-    set_state(mci,json.dumps({'cn':'None'}))
-    
+    old_data = json.loads(get_state(mci))['data']
+    # Сохраняем адрес
+    data = {
+        'order_id': old_data['order_id'],
+        'name': old_data['name'],
+        'size': old_data['size'],
+        'number': old_data['number'],
+        'adress': message.text
+    }
+    set_state(mci, json.dumps({'state': 'order_promo_input', 'data': data}))
+    await app.send_message(mci, "Aveți un cod promoțional? Dacă da, introduceți его acum.\nDacă nu, scrieți „Nu”.")
+
+@app.on_message(state('order_promo_input') & ~ has_text('Anulare⬅') & ~ filters.command('stop'))
+async def order_complete_with_promo(_, message: Message):
+    mci = message.chat.id
+    state_data = json.loads(get_state(mci))
+    data = state_data['data']
+    promo_code = message.text.strip()
+    discount = 0
+    promo_info = None
+    if promo_code.lower() != "nu":
+        promo_info = check_promo_code(promo_code)
+        if promo_info:
+            discount = promo_info['discount']
+            # Если single-use, удаляем промокод после использования
+            if promo_info.get('single_use'):
+                remove_promo_code(promo_code)
+        else:
+            await app.send_message(mci, "Cod promoțional invalid sau expirat. Comanda va fi procesată fără reducere.")
+    set_state(mci, json.dumps({'cn': 'None'}))
     name, price, _, photo = get_item(data['order_id'])
+    final_price = price
+    if discount:
+        final_price = round(price * (100 - discount) / 100, 2)
+        discount_text = f"\n<b>Reducere aplicată:</b> -{discount}%\n<b>Preț cu reducere:</b> {final_price} MDL"
+    else:
+        discount_text = ""
     remove_order_keyboard = InlineKeyboardMarkup([[InlineKeyboardButton('Anulare comandei', callback_data=json.dumps({'cn':'remove_order'}))]])
     for i in ADMIN_IDs:
-        await app.send_photo(i,photo,f'Produs {name} este comandat \n'+f'<b>Price: </b>{price}\n<b>Numele: </b>{data['name']}\n<b>Telefon: </b>{data['size']}\n<b>Mărimea: </b>{data['number']}\n<b>Adresa: </b>{message.text}'+f'\n<b>Contact: </b>@{message.from_user.username} | {message.from_user.mention}',
-        reply_markup=remove_order_keyboard)
-    await app.send_message(mci,f'<b>Comanda a fost înregistrată. Așteptați răspunsul managerului pentru a confirma comanda.</b> \n\n<a href="https://t.me/cross_brand_manager">Pentru întrebări, accesați aici…</a>')
+        await app.send_photo(
+            i,
+            photo,
+            f'Produs {name} este comandat \n'
+            f'<b>Price: </b>{price}\n'
+            f'<b>Numele: </b>{data["name"]}\n'
+            f'<b>Telefon: </b>{data["size"]}\n'
+            f'<b>Mărimea: </b>{data["number"]}\n'
+            f'<b>Adresa: </b>{data["adress"]}'
+            f'{discount_text}'
+            f'\n<b>Contact: </b>@{message.from_user.username} | {message.from_user.mention}',
+            reply_markup=remove_order_keyboard
+        )
+    await app.send_message(
+        mci,
+        f'<b>Comanda a fost înregistrată. Așteptați răspunsul managerului pentru a confirma comanda.</b> \n'
+        f'{discount_text}\n'
+        f'<a href="https://t.me/cross_brand_manager">Pentru întrebări, accesați aici…</a>'
+    )
 
 @app.on_callback_query(remove_order_callback)
 async def remove_order(_, query: CallbackQuery):
@@ -459,10 +526,23 @@ async def admin_panel(_, message: Message):
          InlineKeyboardButton("Eliminați brand 💣", callback_data=json.dumps({"cn":"remove_category_panel"}))],
         [InlineKeyboardButton("Adăugați modelul 👀", callback_data=json.dumps({"cn":"add_subcategory_panel"})),
          InlineKeyboardButton("Eliminați modelul 💣", callback_data=json.dumps({"cn":"remove_subcategory_panel"}))],
-        [InlineKeyboardButton("News 📰", callback_data=json.dumps({"cn":"send_news_panel"}))]
+        [InlineKeyboardButton("News 📰", callback_data=json.dumps({"cn":"send_news_panel"}))],
+        [InlineKeyboardButton("Promo 🎫", callback_data=json.dumps({"cn": "promo_panel"}))]
     ]
     markup = InlineKeyboardMarkup(buttons)
     await app.send_message(message.chat.id, "Admin panel ⚙️", reply_markup=markup)
+
+    # Добавляем обработчик для promo_panel, который вызывает ту же логику, что и /promo
+    @app.on_callback_query(
+        filters.create(lambda _, __, q: json.loads(q.data).get("cn") == "promo_panel" if q.data else False))
+    async def promo_panel_callback(_, query: CallbackQuery):
+        # Просто вызываем функцию promo_admin_entry с тем же message.chat.id
+        class DummyMsg:
+            def __init__(self, chat_id):
+                self.chat = type("obj", (), {"id": chat_id})()
+                self.message_id = None
+
+        await promo_admin_entry(_, DummyMsg(query.message.chat.id))
 
 @app.on_callback_query(filters.create(lambda _, __, q: json.loads(q.data).get("cn") == "add_item_panel" if q.data else False))
 async def add_item_panel_callback(_, query: CallbackQuery):
@@ -578,6 +658,164 @@ async def send_news_panel_callback(_, query: CallbackQuery):
         await app.delete_messages(query.message.chat.id, query.message.id)
     except Exception:
         pass
+
+# --- Система скидок / промокодов: админ-инструменты (добавлено внизу файла) ---
+
+@app.on_message(admin & filters.command("promo"))
+async def promo_admin_entry(_, message):
+    """Команда для открытия панели управления промокодами (для админов)."""
+    buttons = [
+        [InlineKeyboardButton("Adăugați cod ➕", callback_data=json.dumps({"cn":"promo_add_panel"})),
+         InlineKeyboardButton("Lista codurilor 📋", callback_data=json.dumps({"cn":"promo_list"}))],
+        [InlineKeyboardButton("Eliminați codul ❌", callback_data=json.dumps({"cn":"promo_remove_panel"})),
+         InlineKeyboardButton("Anulare ⬅", callback_data=json.dumps({"cn":"cancel"}))]
+    ]
+    await app.send_message(message.chat.id, "Panou de control al codurilor promoționale:", reply_markup=InlineKeyboardMarkup(buttons))
+
+@app.on_callback_query(filters.create(lambda _, __, q: json.loads(q.data).get("cn") == "promo_add_panel" if q.data else False))
+async def promo_add_panel(_, query: CallbackQuery):
+    set_state(query.message.chat.id, json.dumps({"state":"promo_add_input"}))
+    await app.send_message(query.message.chat.id, "Introduceți codul promoțional în formatul: COD, REDUCERE(%), ZILE(days), [single]\nExemplu: REDUCERE20 20 30\nAdăugați cuvântul „single” la sfârșit dacă codul trebuie să fie de unică folosință.")
+    try:
+        await app.delete_messages(query.message.chat.id, query.message.id)
+    except Exception:
+        pass
+
+@app.on_message(state("promo_add_input"))
+async def promo_add_input(_, message):
+    try:
+        parts = message.text.strip().split()
+        if len(parts) < 3:
+            await message.reply("Error. Exemplu: CODE DISCOUNT DAYS")
+            set_state(message.chat.id, json.dumps({'cn':'None'}))
+            return
+        code = parts[0]
+        discount = int(parts[1])
+        days = int(parts[2])
+        single = False
+        if len(parts) > 3 and parts[3].lower() == "single":
+            single = True
+        add_promo_code(code, discount, days, single)
+        await message.reply(f"Codul {code.upper()} a fost adăugat: {discount}% pe {days} zile{' (single-use)' if single else ''}.")
+    except ValueError:
+        await message.reply("Ошибка: discount и days должны быть целыми числами.")
+    except Exception as e:
+        await message.reply("Произошла ошибка при добавлении промокода.")
+    finally:
+        set_state(message.chat.id, json.dumps({'cn':'None'}))
+
+@app.on_callback_query(filters.create(lambda _, __, q: json.loads(q.data).get("cn") == "promo_list" if q.data else False))
+async def promo_list_callback(_, query: CallbackQuery):
+    try:
+        rows = list_promo_codes()
+        if not rows:
+            await app.send_message(query.message.chat.id, "None.")
+            return
+        text_lines = []
+        for code, discount, valid_until, single in rows:
+            text_lines.append(f"{code} — {discount}% — до {__import__('datetime').datetime.fromtimestamp(valid_until).strftime('%d.%m.%Y')} {'(single)' if single else ''}")
+        await app.send_message(query.message.chat.id, "List:\n" + "\n".join(text_lines))
+    except Exception:
+        await app.send_message(query.message.chat.id, "Error.")
+
+@app.on_callback_query(filters.create(lambda _, __, q: json.loads(q.data).get("cn") == "promo_remove_panel" if q.data else False))
+async def promo_remove_panel(_, query: CallbackQuery):
+    set_state(query.message.chat.id, json.dumps({"state":"promo_remove_input"}))
+    await app.send_message(query.message.chat.id, "Introduceți codul promoțional pentru ștergere (exemplu: SALE20)")
+    try:
+        await app.delete_messages(query.message.chat.id, query.message.id)
+    except Exception:
+        pass
+
+@app.on_message(state("promo_remove_input"))
+async def promo_remove_input(_, message):
+    code = message.text.strip()
+    try:
+        remove_promo_code(code)
+        await message.reply(f"Codul {code.upper()} a fost utilizat.")
+    except Exception:
+        await message.reply("Error.")
+    finally:
+        set_state(message.chat.id, json.dumps({'cn':'None'}))
+
+# --- Safety wrapper: перехват ошибок при отправке сообщений/фото (не менять вызовы в коде) ---
+# (предыдущая версия использовала @app.on_startup() — у Client такого декоратора нет; применяем сразу)
+
+try:
+    # Попробовать наиболее вероятные места расположения исключения в разных версиях Pyrogram
+    from pyrogram.errors.exceptions.bad_request_400 import InputUserDeactivated
+except Exception:
+    try:
+        from pyrogram.errors import InputUserDeactivated
+    except Exception:
+        InputUserDeactivated = None
+
+# Сохраняем оригинальные методы (будут заменены далее)
+_original_send_photo = None
+_original_send_message = None
+
+async def _safe_send_photo(chat_id, *args, **kwargs):
+    try:
+        if _original_send_photo is None:
+            return None
+        return await _original_send_photo(chat_id, *args, **kwargs)
+    except Exception as e:
+        if InputUserDeactivated is not None and isinstance(e, InputUserDeactivated):
+            try:
+                if 'ADMIN_IDs' in globals() and chat_id in ADMIN_IDs:
+                    try:
+                        ADMIN_IDs.remove(chat_id)
+                    except Exception:
+                        pass
+                try:
+                    remove_user(chat_id)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+            return None
+        raise
+
+async def _safe_send_message(chat_id, *args, **kwargs):
+    try:
+        if _original_send_message is None:
+            return None
+        return await _original_send_message(chat_id, *args, **kwargs)
+    except Exception as e:
+        if InputUserDeactivated is not None and isinstance(e, InputUserDeactivated):
+            try:
+                if 'ADMIN_IDs' in globals() and chat_id in ADMIN_IDs:
+                    try:
+                        ADMIN_IDs.remove(chat_id)
+                    except Exception:
+                        pass
+                try:
+                    remove_user(chat_id)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+            return None
+        raise
+
+# Применяем монки‑патч немедленно — сохраняем оригиналы и заменяем методы клиента до app.run()
+try:
+    _original_send_photo = getattr(app, "send_photo", None)
+    _original_send_message = getattr(app, "send_message", None)
+    try:
+        if _original_send_photo:
+            app.send_photo = _safe_send_photo  # type: ignore
+    except Exception:
+        pass
+    try:
+        if _original_send_message:
+            app.send_message = _safe_send_message  # type: ignore
+    except Exception:
+        pass
+except Exception:
+    pass
+
+# --- Конец добавленного кода для безопасной отправки ---
 
 print('running...')
 app.run()

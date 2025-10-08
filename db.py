@@ -112,4 +112,51 @@ def get_hidden_models(chat_id):
 def get_last_orders(limit=5):
     # Заглушка: реализуйте хранение заказов для расширения функционала
     return []
-init()
+
+def ensure_promo_table():
+    """Создаёт таблицу promo_codes, если её ещё нет.
+       Безопасно: не выполняется до инициализации con/cur."""
+    if con is None or cur is None:
+        return
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS promo_codes (
+            code TEXT PRIMARY KEY,
+            discount INTEGER,          -- процент скидки, 0-100
+            valid_until INTEGER,       -- unix timestamp
+            single_use INTEGER DEFAULT 0 -- 0флаг единовременного промокода (/1)
+        )
+    """)
+    con.commit()
+
+def add_promo_code(code: str, discount: int, valid_days: int, single_use: bool = False):
+    """Добавляет промокод: code, процент discount, срок действия в днях, флаг single_use."""
+    valid_until = int(time()) + int(valid_days) * 86400
+    cur.execute("REPLACE INTO promo_codes (code, discount, valid_until, single_use) VALUES (?, ?, ?, ?)",
+                (code.strip().upper(), int(discount), valid_until, 1 if single_use else 0))
+    con.commit()
+
+def check_promo_code(code: str):
+    """Возвращает (discount, single_use) если код действителен, иначе None."""
+    if not code:
+        return None
+    row = cur.execute("SELECT discount, valid_until, single_use FROM promo_codes WHERE code = ?", (code.strip().upper(),)).fetchone()
+    if not row:
+        return None
+    discount, valid_until, single_use = row
+    if int(valid_until) < int(time()):
+        return None
+    return {"discount": int(discount), "single_use": bool(single_use)}
+
+def remove_promo_code(code: str):
+    """Удаляет промокод по коду."""
+    cur.execute("DELETE FROM promo_codes WHERE code = ?", (code.strip().upper(),))
+    con.commit()
+
+def list_promo_codes():
+    """Возвращает список всех промокодов: [(code, discount, valid_until, single_use), ...]"""
+    rows = cur.execute("SELECT code, discount, valid_until, single_use FROM promo_codes ORDER BY valid_until DESC").fetchall()
+    return rows
+
+# инициализация уже выполнена выше; создаём таблицу промокодов сейчас только если БД уже инициализирована
+if con is not None and cur is not None:
+    ensure_promo_table()
