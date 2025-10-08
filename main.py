@@ -738,6 +738,81 @@ async def promo_remove_input(_, message):
     finally:
         set_state(message.chat.id, json.dumps({'cn':'None'}))
 
+# --- Реферальная система ---
+
+from db import register_referral, get_referrals, get_referrer, has_used_referral_bonus, mark_referral_bonus_used
+from keyboard import send_menu_with_referral
+
+REFERRAL_BONUS = 5  # размер бонуса за приглашение (можно менять)
+
+@app.on_message(filters.command("referral"))
+async def referral_info(_, message):
+    user_id = message.from_user.id
+    link = f"https://t.me/{(await app.get_me()).username}?start=ref{user_id}"
+    referrals = get_referrals(user_id)
+    text = f"Linkul dumneavoastră de recomandare:\n{link}\n\n"
+    text += f"Voi aţi invitat: {len(referrals)} utilizatori.\n"
+    if referrals:
+        text += "ID-ul invitatului: " + ", ".join(map(str, referrals))
+    await app.send_message(message.chat.id, text)
+
+@app.on_callback_query(filters.create(lambda _, __, q: json.loads(q.data).get("cn") == "referral_menu" if q.data else False))
+async def referral_menu_callback(_, query: CallbackQuery):
+    user_id = query.from_user.id
+    link = f"https://t.me/{(await app.get_me()).username}?start=ref{user_id}"
+    referrals = get_referrals(user_id)
+    text = f"Linkul dumneavoastră de recomandare:\n{link}\n\n"
+    text += f"Voi aţi invitat: {len(referrals)} utilizatori.\n"
+    if referrals:
+        text += "ID приглашённых: " + ", ".join(map(str, referrals))
+    # Кнопка возврата в меню
+    back_markup = InlineKeyboardMarkup([[InlineKeyboardButton("Înapoi la meniu", callback_data=json.dumps({"cn": "back_to_menu"}))]])
+    await app.send_message(query.message.chat.id, text, reply_markup=back_markup)
+    try:
+        await app.delete_messages(query.message.chat.id, query.message.id)
+    except Exception:
+        pass
+
+@app.on_callback_query(filters.create(lambda _, __, q: json.loads(q.data).get("cn") == "back_to_menu" if q.data else False))
+async def back_to_menu_callback(_, query: CallbackQuery):
+    await send_menu(app, query.message.chat.id)
+    try:
+        await app.delete_messages(query.message.chat.id, query.message.id)
+    except Exception:
+        pass
+
+@app.on_message(filters.command('start'))
+async def start_with_referral(_, message):
+    args = message.text.split()
+    user_id = message.from_user.id
+    referrer_id = None
+    if len(args) > 1 and args[1].startswith("ref"):
+        try:
+            referrer_id = int(args[1][3:])
+        except Exception:
+            referrer_id = None
+    if referrer_id and referrer_id != user_id:
+        register_referral(user_id, referrer_id)
+    await app.send_message(
+        message.chat.id,
+        f'Buna <b>{message.from_user.first_name if message.from_user.first_name else ""} {message.from_user.last_name if message.from_user.last_name else ""}</b> \nAcest Bot vă prezintă gama completă de adidași din magazinul @Cross_Brand_md. Pentru a plasa o comandă, accesați „Catalog”, selectați modelul dorit de adidași și indicați detaliile destinatarului. După aceasta, așteptați un mesaj de la manager pentru confirmarea comenzii. \n\n<b>Important: pentru modelele de pe loc  și cele care sunt la reducere, livrarea se efectuează în 24-48 de ore; celelalte modele vor fi livrate în 3-5 zile lucrătoare.</b>\n\nPentru comenzi și întrebări, scrieți managerului @cross_brand_manager.'
+    )
+    set_state(message.chat.id, json.dumps({'cn': 'None'}))
+    await send_menu_with_referral(app, message.chat.id)
+
+# --- Использование бонуса при заказе (пример: скидка при первом заказе) ---
+# Вставьте этот код в order_complete_with_promo после расчёта скидки, если хотите давать бонус за реферала
+
+# Пример:
+# referrer_id = get_referrer(mci)
+# if referrer_id and not has_used_referral_bonus(mci):
+#     final_price = max(0, final_price - REFERRAL_BONUS)
+#     mark_referral_bonus_used(mci)
+#     await app.send_message(mci, f"Вам применён реферальный бонус {REFERRAL_BONUS} MDL!")
+#     await app.send_message(referrer_id, f"Ваш приглашённый совершил покупку! Вам начислен бонус.")
+
+# --- Конец реферальной системы ---
+
 # --- Safety wrapper: перехват ошибок при отправке сообщений/фото (не менять вызовы в коде) ---
 # (предыдущая версия использовала @app.on_startup() — у Client такого декоратора нет; применяем сразу)
 

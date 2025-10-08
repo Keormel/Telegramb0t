@@ -46,7 +46,7 @@ def get_brands():
     result = cur.execute("SELECT brand, id FROM model_brand")
     return list(dict.fromkeys([i[0] for i in result.fetchall()]))
 
-def add_item(sub_id, name, price, description, photo): 
+def add_item(sub_id, name, price, description, photo):
     cur.execute("REPLACE INTO items(sub_id, full_name, price, description, photo, add_time) VALUES(?,?,?,?,?,?)", (sub_id, name, price, description, photo, int(time())))
     con.commit()
 
@@ -157,6 +157,56 @@ def list_promo_codes():
     rows = cur.execute("SELECT code, discount, valid_until, single_use FROM promo_codes ORDER BY valid_until DESC").fetchall()
     return rows
 
-# инициализация уже выполнена выше; создаём таблицу промокодов сейчас только если БД уже инициализирована
+# --- Реферальная система ---
+
+def ensure_referral_table():
+    """Создаёт таблицу для реферальной системы, если её нет."""
+    if con is None or cur is None:
+        return
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS referrals (
+            user_id INTEGER PRIMARY KEY,
+            referrer_id INTEGER,
+            registered_at INTEGER,
+            bonus_used INTEGER DEFAULT 0
+        )
+    """)
+    con.commit()
+
+def register_referral(user_id: int, referrer_id: int):
+    """Регистрирует пользователя с рефералом, если ещё не зарегистрирован."""
+    if cur is None: return
+    if user_id == referrer_id or user_id is None or referrer_id is None:
+        return
+    row = cur.execute("SELECT user_id FROM referrals WHERE user_id=?", (user_id,)).fetchone()
+    if row:
+        return
+    cur.execute("INSERT INTO referrals (user_id, referrer_id, registered_at) VALUES (?, ?, ?)", (user_id, referrer_id, int(time())))
+    con.commit()
+
+def get_referrer(user_id: int):
+    """Возвращает ID пригласившего пользователя, если есть."""
+    if cur is None: return None
+    row = cur.execute("SELECT referrer_id FROM referrals WHERE user_id=?", (user_id,)).fetchone()
+    return row[0] if row else None
+
+def get_referrals(referrer_id: int):
+    """Возвращает список ID приглашённых пользователей."""
+    if cur is None: return []
+    rows = cur.execute("SELECT user_id FROM referrals WHERE referrer_id=?", (referrer_id,)).fetchall()
+    return [r[0] for r in rows]
+
+def mark_referral_bonus_used(user_id: int):
+    """Отметить, что бонус за реферала использован (например, после первой покупки)."""
+    if cur is None: return
+    cur.execute("UPDATE referrals SET bonus_used=1 WHERE user_id=?", (user_id,))
+    con.commit()
+
+def has_used_referral_bonus(user_id: int):
+    if cur is None: return False
+    row = cur.execute("SELECT bonus_used FROM referrals WHERE user_id=?", (user_id,)).fetchone()
+    return bool(row and row[0])
+
+# Инициализация таблицы рефералов
 if con is not None and cur is not None:
-    ensure_promo_table()
+    ensure_referral_table()
