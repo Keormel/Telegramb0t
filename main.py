@@ -231,9 +231,25 @@ async def menu(_, message: Message):
 
 @app.on_message(filters.command('start'))
 async def start(_, message: Message):
-    await app.send_message(message.chat.id,f'Buna <b>{message.from_user.first_name if message.from_user.first_name else ''} {message.from_user.last_name if message.from_user.last_name else ''}</b> \nAcest Bot vă prezintă gama completă de adidași din magazinul @Cross_Brand_md. Pentru a plasa o comandă, accesați „Catalog”, selectați modelul dorit de adidași și indicați detaliile destinatarului. După aceasta, așteptați un mesaj de la manager pentru confirmarea comenzii. \n\n<b>Important: pentru modelele de pe loc  și cele care sunt la reducere, livrarea se efectuează în 24-48 de ore; celelalte modele vor fi livrate în 3-5 zile lucrătoare.</b>\n\nPentru comenzi și întrebări, scrieți managerului @cross_brand_manager.')
-    set_state(message.chat.id,json.dumps({'cn':'None'}))
-    await send_menu(app, message.chat.id)    
+    args = message.text.split()
+    user_id = message.from_user.id
+    referrer_id = None
+    if len(args) > 1 and args[1].startswith("ref"):
+        try:
+            referrer_id = int(args[1][3:])
+        except Exception:
+            referrer_id = None
+    # Регистрируем пользователя (с рефералом или без)
+    if referrer_id and referrer_id != user_id:
+        register_referral(user_id, referrer_id)
+    else:
+        register_referral(user_id, None)
+    await app.send_message(
+        message.chat.id,
+        f'Buna <b>{message.from_user.first_name if message.from_user.first_name else ""} {message.from_user.last_name if message.from_user.last_name else ""}</b> \nAcest Bot vă prezintă gama completă de adidași din magazinul @Cross_Brand_md. Pentru a plasa o comandă, accesați „Catalog”, selectați modelul dorit de adidași și indicați detaliile destinatarului. După aceasta, așteptați un mesaj de la manager pentru confirmarea comenzii. \n\n<b>Important: pentru modelele de pe loc  și cele care sunt la reducere, livrarea se efectuează în 24-48 de ore; celelalte modele vor fi livrate în 3-5 zile lucrătoare.</b>\n\nPentru comenzi și întrebări, scrieți managerului @cross_brand_manager.'
+    )
+    set_state(message.chat.id, json.dumps({'cn': 'None'}))
+    await send_menu_with_referral(app, message.chat.id)
 
 
 @app.on_callback_query(brands_callback)
@@ -764,7 +780,7 @@ async def referral_menu_callback(_, query: CallbackQuery):
     text = f"Linkul dumneavoastră de recomandare:\n{link}\n\n"
     text += f"Voi aţi invitat: {len(referrals)} utilizatori.\n"
     if referrals:
-        text += "ID приглашённых: " + ", ".join(map(str, referrals))
+        text += "ID: " + ", ".join(map(str, referrals))
     # Кнопка возврата в меню
     back_markup = InlineKeyboardMarkup([[InlineKeyboardButton("Înapoi la meniu", callback_data=json.dumps({"cn": "back_to_menu"}))]])
     await app.send_message(query.message.chat.id, text, reply_markup=back_markup)
@@ -780,25 +796,6 @@ async def back_to_menu_callback(_, query: CallbackQuery):
         await app.delete_messages(query.message.chat.id, query.message.id)
     except Exception:
         pass
-
-@app.on_message(filters.command('start'))
-async def start_with_referral(_, message):
-    args = message.text.split()
-    user_id = message.from_user.id
-    referrer_id = None
-    if len(args) > 1 and args[1].startswith("ref"):
-        try:
-            referrer_id = int(args[1][3:])
-        except Exception:
-            referrer_id = None
-    if referrer_id and referrer_id != user_id:
-        register_referral(user_id, referrer_id)
-    await app.send_message(
-        message.chat.id,
-        f'Buna <b>{message.from_user.first_name if message.from_user.first_name else ""} {message.from_user.last_name if message.from_user.last_name else ""}</b> \nAcest Bot vă prezintă gama completă de adidași din magazinul @Cross_Brand_md. Pentru a plasa o comandă, accesați „Catalog”, selectați modelul dorit de adidași și indicați detaliile destinatarului. După aceasta, așteptați un mesaj de la manager pentru confirmarea comenzii. \n\n<b>Important: pentru modelele de pe loc  și cele care sunt la reducere, livrarea se efectuează în 24-48 de ore; celelalte modele vor fi livrate în 3-5 zile lucrătoare.</b>\n\nPentru comenzi și întrebări, scrieți managerului @cross_brand_manager.'
-    )
-    set_state(message.chat.id, json.dumps({'cn': 'None'}))
-    await send_menu_with_referral(app, message.chat.id)
 
 # --- Использование бонуса при заказе (пример: скидка при первом заказе) ---
 # Вставьте этот код в order_complete_with_promo после расчёта скидки, если хотите давать бонус за реферала

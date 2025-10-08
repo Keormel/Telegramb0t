@@ -13,6 +13,7 @@ def init():
     cur.execute("CREATE TABLE IF NOT EXISTS items (id INTEGER, sub_id INTEGER,full_name TEXT,price INTEGER,photo TEXT,description TEXT,PRIMARY KEY(id AUTOINCREMENT))")
     cur.execute("CREATE TABLE IF NOT EXISTS model_brand (id INTEGER, brand TEXT,model TEXT,PRIMARY KEY(id AUTOINCREMENT))")
     cur.execute("CREATE TABLE IF NOT EXISTS user_states(chat_id INTEGER PRIMARY KEY, state TEXT)")
+    ensure_referral_table()
 
 def remove_user(chat_id):
     cur.execute("DELETE FROM user_states WHERE chat_id==?",(chat_id,))
@@ -174,9 +175,10 @@ def ensure_referral_table():
     con.commit()
 
 def register_referral(user_id: int, referrer_id: int):
-    """Регистрирует пользователя с рефералом, если ещё не зарегистрирован."""
+    """Регистрирует пользователя с рефералом, если ещё не зарегистрирован.
+    Если referrer_id=None, просто регистрирует пользователя."""
     if cur is None: return
-    if user_id == referrer_id or user_id is None or referrer_id is None:
+    if user_id is None:
         return
     row = cur.execute("SELECT user_id FROM referrals WHERE user_id=?", (user_id,)).fetchone()
     if row:
