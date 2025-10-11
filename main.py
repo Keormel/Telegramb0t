@@ -8,7 +8,7 @@ from db import *
 import json
 from filters import *
 from keyboard import *
-init()
+init() # fix инициализации базы данных
 
 # Добавляем вызов создания таблицы промокодов сразу после инициализации БД
 try:
